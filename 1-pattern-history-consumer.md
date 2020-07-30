@@ -1,6 +1,6 @@
 # A pattern for history consumer in event sourcing
 
-Event sourcing is a popular (technique to capture changes to data as a sequence of events)[ref1].
+Event sourcing is a popular [technique to capture changes to data as a sequence of events](ref1).
 
 Applications interested in this data usually read (consume) the events in order and build an
 accumulated representation often referred to as "the state".
@@ -14,19 +14,21 @@ to particularly lightweight micro/nano-services with no permanent storage depend
 The caveat is that the service probably should hold off any work until this state is rebuilt, otherwise
 it might lack information it needs to correctly do its function.
 For example, it might publish events that are already in the log, but since it has not _caught up_
-with it entirely, it publishs them again, leading to duplicates, corrupting the log, etc.
+with it entirely, it publish them again, leading to duplicates, corrupting the log, etc.
 
 In a single process or single threaded system this is a trivial problem to solve.
 Simply ensure that the application first consumes all of the log, and only after that it can start doing its thing.
 
-But that is not how modern applications are built. Even if it takes just a few seconds to process all of the
-log, users expect the application to be responsive during that time, even if it only is able to say "loading...".
+But that is not how modern applications are built.
+Even if it takes just a few seconds to process all of the log,
+users expect the application to be responsive during that time.
+For example, service health and _readyness_ checks should respond accordingly.
 
 
 ## Signalling when it catches up
 
 A pattern that I've come across and grew fond of is for the thread (or group of threads) that is rebuilding
-state from the log to signal other threads, that depend on that state, that it is has caught up, ergo,
+state from the log to signal other that depend on the state, that it is has caught up, ergo,
 the state is ready.
 
 You might already be thinking how this can be achieved with most concurrency primitives, such as locks or
@@ -108,7 +110,12 @@ func main() {
 }
 ```
 
+This is barely scratching the surface and in a following post I'll be showing how this can
+be done on a more realistic environment, such as when using Apache Kafka as the stream processor.
 
----
+## Key takeaways:
+
+- using in-memory only store can lead to lower dependency micro/nano-services
+- reprocessing the entire event log on start up does not have to be complicated
 
 [ref1]:https://martinfowler.com/eaaDev/EventSourcing.html
