@@ -12,9 +12,9 @@ In this case, every time the application starts it needs to go through all the e
 If the amount of events is low enough and the processing time is quick enough, then this can lead
 to particularly lightweight micro/nano-services with no permanent storage dependencies.
 The caveat is that the service probably should hold off any work until this state is rebuilt, otherwise
-it might lack information it needs to correctly do its function.
+it may lack information it needs to correctly function.
 For example, it might publish events that are already in the log, but since it has not _caught up_
-with it entirely, it publish them again, leading to duplicates, corrupting the log, etc.
+with it entirely, it publishes them again, leading to duplicates, corrupting the log, etc.
 
 In a single process or single threaded system this is a trivial problem to solve.
 Simply ensure that the application first consumes all of the log, and only after that it can start doing its thing.
@@ -27,12 +27,12 @@ For example, service health and _readyness_ checks should respond accordingly.
 
 ## Signalling when it catches up
 
-A pattern that I've come across and grew fond of is for the thread (or group of threads) that is rebuilding
-state from the log to signal other that depend on the state, that it is has caught up, ergo,
+A pattern that I've come across and grown fond of is for the thread (or group of threads) that is rebuilding
+state from the log, to signal to others that depend on the state, that it is has caught up, ergo,
 the state is ready.
 
 You might already be thinking how this can be achieved with most concurrency primitives, such as locks or
-semaphores, and yes, it's really not that complicated.
+semaphores, and yes, this is a good way to handle the problem.
 
 As example of this that uses Go's channels would look like the following:
 
@@ -111,7 +111,7 @@ func main() {
 ```
 
 This is barely scratching the surface and in a following post I'll be showing how this can
-be done on a more realistic environment, such as when using Apache Kafka as the stream processor.
+be done in a more realistic environment, such as when using Apache Kafka as the stream processor.
 
 ## Key takeaways:
 
