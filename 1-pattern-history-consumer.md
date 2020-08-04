@@ -22,7 +22,9 @@ Simply ensure that the application first consumes all of the log, and only after
 But that is not how modern applications are built.
 Even if it takes just a few seconds to process all of the log,
 users expect the application to be responsive during that time.
-For example, service health and _readyness_ checks should respond accordingly.
+For example, service health and _readyness_ checks should respond accordingly, or
+an API required by a user-facing front-end app can have a loading indication
+while processing is done.
 
 
 ## Signalling when it catches up
@@ -34,7 +36,7 @@ the state is ready.
 You might already be thinking how this can be achieved with most concurrency primitives, such as locks or
 semaphores, and yes, this is a good way to handle the problem.
 
-As example of this that uses Go's channels would look like the following:
+An example of this that uses Go's channels would look like the following:
 
 ```go
 package main
@@ -111,11 +113,28 @@ func main() {
 ```
 
 This is barely scratching the surface and in a following post I'll be showing how this can
-be done in a more realistic environment, such as when using Apache Kafka as the stream processor.
+be done in a more realistic environment, such as when using Apache Kafka for the event log storage.
+
+### But... Will it scale?
+
+If there is the need for the service to be scaled horizontally and for all the instances to share the
+state, then an in-memory store is no longer suitable but this pattern can still be useful.
+
+The major problem to solve would be the coordination between the instances when
+they need to re-create / update the store (after some downtime for example).
+One way is to ensure only one instance can write to the store while others wait, or
+you can have some strategy to partition writes between instances.
+Signalling whether a particular instance should write or wait for the store depends greatly on
+the storage system.
 
 ## Key takeaways:
 
+When there is the need to process a backlog of messages before anything else:
+
 - using in-memory only store can lead to lower dependency micro/nano-services
-- reprocessing the entire event log on start up does not have to be complicated
+- in-memory store also allows apps to rely on in-process communication / synchronization tools
+- reprocessing the entire event log on start-up, and signalling once done to unblock other threads,
+can lead to a flow that is easier to reason about
+
 
 [ref1]:https://martinfowler.com/eaaDev/EventSourcing.html
