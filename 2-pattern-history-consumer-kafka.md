@@ -22,10 +22,10 @@ There can be any number of messages after the one at the offset, and that amount
 So, when our consumer connects to Kafka, it can inspect the state of the consumer group to determine
 how many messages there are in the topic.
 
-Each time a messages is consumed, it can compare the current offset with the previously recorded total.
+Each time a message is consumed, we can compare the current offset with the previously recorded total.
 When they match, it's considered caught-up.
-Note that it's important to capture the total messages before starting consumption because most likely
-the topic will be increasing in size as time goes by.
+Note that it's important to capture the total messages before starting consumption because most likely there
+will be new messages being written to the topic at a regular pace.
 
 ## An implementation
 
@@ -55,29 +55,6 @@ type Message interface {
 	Data() []byte
 }
 
-// NewKafka constructs a new consumer.
-func NewKafka(config KafkaConfig) Consumer {
-	sc := sarama.NewConfig()
-    sc.ClientID = config.ClientID
-
-	version, err := sarama.ParseKafkaVersion(config.Version)
-	if err != nil {
-		version = sarama.V2_0_1_0
-	}
-
-    // start reading from the beginning of the topic
-	sc.Consumer.Offsets.Initial = sarama.OffsetOldest
-	sc.Version = version
-
-
-	return &kafkaConsumer{
-		config:       config,
-		saramaConfig: sc,
-		caughtUpSig:  make(chan struct{}),
-		caughtUp:     false,
-	}
-}
-
 // KafkaConfig encapsulates the field to configure a kafka consumer.
 type KafkaConfig struct {
 	ClientID      string
@@ -91,6 +68,7 @@ type KafkaConfig struct {
 type kafkaConsumer struct {
 	handler      HandleFunc
 	config       KafkaConfig
+
 	saramaConfig *sarama.Config
 	client       sarama.Client
 	offsets      FetchOffsetsResponse
@@ -103,13 +81,162 @@ type kafkaConsumer struct {
 	numTopicPartitionsCaughtUp uint32
 }
 
-func (k *kafkaConsumer) ReadHistory(ctx context.Context, handler HandleFunc) error {
-...
+// NewKafka constructs a new consumer.
+func NewKafka(config KafkaConfig, handler HandleFunc) Consumer {
+	sc := sarama.NewConfig()
+    sc.ClientID = config.ClientID
+
+	version, err := sarama.ParseKafkaVersion(config.Version)
+	if err != nil {
+		version = sarama.V2_0_1_0
+	}
+
+    // start reading from the beginning of the topic
+	sc.Consumer.Offsets.Initial = sarama.OffsetOldest
+	sc.Consumer.Offsets.Retention = time.Second * 1
+	sc.Version = version
+
+	client, err := sarama.NewClient(config.Addresses, sc)
+	if err != nil {
+		return err
+	}
+
+	offsets, err := FetchNewestOffsets(client, config.Topics...)
+	if err != nil {
+		return err
+	}
+
+  	k := &kafkaConsumer{
+		config:       config,
+		saramaConfig: sc,
+		caughtUpSig:  make(chan struct{}),
+		caughtUp:     false,
+		client:       client,
+		offsets:      offsets,
+		handler:      handler,
+	}
+
+	for _, p := range offsets {
+		for _, offs := range p {
+			if offs > 0 {
+				k.numTopicPartitions++
+			}
+		}
+	}
+	// No offsets to catch up to, topic might be empty - set as caught up now
+	if k.numTopicPartitions == 0 {
+		close(k.caughtUpSig)
+		k.caughtUp = true
+	}
+
+	return k
+}
+
+// PartitionOffsets is a map of partitions with their offsets
+type PartitionOffsets map[int32]int64
+// FetchOffsetsResponse is a map of topics containing partition offsets
+type FetchOffsetsResponse map[string]PartitionOffsets
+
+func FetchNewestOffsets(cl sarama.Client, topics ...string) (FetchOffsetsResponse, error) {
+	err := cl.RefreshMetadata(topics...)
+	if err != nil {
+		return nil, err
+	}
+
+	var res FetchOffsetsResponse = make(map[string]PartitionOffsets)
+
+	for _, topic := range topics {
+		parts, err := cl.Partitions(topic)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, part := range parts {
+			partOffset, err := cl.GetOffset(topic, part, sarama.OffsetNewest)
+			if err != nil {
+				return nil, err
+			}
+
+			partOffsets, ok := res[topic]
+			if !ok {
+				partOffsets = make(map[int32]int64)
+			}
+
+			partOffsets[part] = partOffset
+			res[topic] = partOffsets
+		}
+	}
+
+	return res, nil
+}
+
+func (k *kafkaConsumer) start(ctx context.Context) error {
+	group, err := sarama.NewConsumerGroupFromClient(k.config.ConsumerGroup, k.client)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for {
+			gerr, open := <-group.Errors()
+			if !open {
+				return
+			}
+			if gerr != nil {
+				if cerr, ok := gerr.(*sarama.ConsumerError); ok {
+					// unrecoverable error
+					if cerr.Err == sarama.ErrUnknownMemberId {
+						k.groupCtxLock.RLock()
+						groupCancel := k.groupCancel
+						k.groupCtxLock.RUnlock()
+						if groupCancel != nil {
+							groupCancel()
+						}
+					}
+				}
+			}
+		}
+	}()
+
+	var groupErr error
+consumerGroupLoop:
+	for {
+		groupCtx, groupCancel := context.WithCancel(ctx)
+		defer groupCancel()
+
+		k.groupCtxLock.Lock()
+		k.groupCancel = groupCancel
+		k.groupCtxLock.Unlock()
+		groupErr = group.Consume(groupCtx, k.config.Topics, k)
+
+		select {
+		case <-groupCtx.Done():
+			break consumerGroupLoop
+		default:
+		}
+
+		groupCancel()
+		if groupErr != nil {
+			break consumerGroupLoop
+		}
+	}
+
+	closeErr := group.Close()
+	if closeErr != nil {
+		if groupErr == nil {
+			return closeErr
+		}
+
+		return fmt.Errorf(
+			"error in consumer group: %v - additional error encountered closing group: %v",
+			groupErr, closeErr)
+	}
+
+	return groupErr
 }
 
 ```
 
-Usage...
 
 [ref1]:https://github.com/nunosilva800/blog/blob/master/1-pattern-history-consumer.md
 [ref2]:https://github.com/Shopify/sarama
