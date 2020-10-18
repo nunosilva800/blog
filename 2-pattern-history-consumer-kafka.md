@@ -198,7 +198,7 @@ func NewKafka(topic string, addresses []string, handler HandleFunc) HistoryConsu
 	// ...
 
 	// Fetch the latest info about the offsets for the next produced message, per partition
-	offsets, err := FetchNewestOffsets(client, config.Topic)
+	offsets, err := FetchNewestOffsets(client, topic)
 	if err != nil {
 		return err
 	}
