@@ -60,8 +60,6 @@ Let's do this!
 ```go
 // HistoryConsumer is the interface describing the operations available on a consumer.
 type HistoryConsumer interface {
-	// Close will close the underlying messaging connections
-	io.Closer
 	// ReadHistory will start consuming messages from the underlying
 	// messaging system, and signal the reaching of the "end of the queue"
 	// via the channel exposed on the CaughtUp method.
