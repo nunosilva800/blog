@@ -2,6 +2,15 @@
 
 In a [previous post](ref1), I wrote about a general approach for a service to process a backlog of messages before doing anything else.
 
+For this scenario, one possible solution is to have an ENV var or expose an API that will turn off or on
+the production of new messages, until it is known that all the backlog of messages were consumed.
+
+This is typically done by manual interactions:
+- turning off the producer
+- letting the consumer do its thing to build state
+- monitor the progress of consumption
+- turning on the producer when it's ready
+
 In this post, instead of using an in-memory implementation example, I'll expand on this concept by using Apache Kafka as the event store.
 To interact with Kafka, we'll be using the Go client library: [Shopify/sarama](ref2).
 
@@ -67,16 +76,7 @@ type HistoryConsumer interface {
 // be marked as consumed to the messaging system and not be delivered again.
 type HandleFunc func(context.Context, []byte) error
 
-// KafkaConfig encapsulates the field to configure a kafka consumer.
-type KafkaConfig struct {
-	Version       string   // kafka broker version
-	Addresses     []string // kafka broker addresses
-	ConsumerGroup string   // consumer group name
-	Topic         string   // topic name to consume
-}
-
 type kafkaConsumer struct {
-	config       KafkaConfig
 	handler      HandleFunc
 
 	saramaConfig *sarama.Config
@@ -84,31 +84,25 @@ type kafkaConsumer struct {
 
 	// channel to be closed when it catches up
 	caughtUpSig  chan struct{}
+	// to keep track of caught up state
 	caughtUp     bool
-
-	// TODOBLOG: explain this
-	// groupCtxLock sync.RWMutex
-	// groupCancel  context.CancelFunc
 }
 ```
 
-### Reading from beginning
+### Reading from the beginning
 
 Sarama provides plenty of configuration options to connect to a Kafka broker.
 For our goal, the important ones to set are the following:
 
 ```go
-// NewKafka constructs a new history consumer.
-func NewKafka(config KafkaConfig, handler HandleFunc) HistoryConsumer {
+// NewKafka constructs a new history consumer for the topic, connecting to broker at the addresses
+// HandleFunc is the function that will handle each message received
+func NewKafka(topic string, addresses []string, handler HandleFunc) HistoryConsumer {
 	// build a new sarama config
 	sc := sarama.NewConfig()
 
-	// set the version or a default
-	version, err := sarama.ParseKafkaVersion(config.Version)
-	if err != nil {
-		version = sarama.V2_0_1_0
-	}
-	sc.Version = version
+	// set the kafka broker version
+	sc.Version = sarama.V2_0_1_0
 
 	// start reading from the beginning of the topic
 	// note this will have no effect if the broker has this consumer group offset previously committed
@@ -120,14 +114,13 @@ func NewKafka(config KafkaConfig, handler HandleFunc) HistoryConsumer {
 	sc.Consumer.Offsets.Retention = time.Second * 1
 
 	// init the sarama client
-	client, err := sarama.NewClient(config.Addresses, sc)
+	client, err := sarama.NewClient(addresses, sc)
 	if err != nil {
 		return err
 	}
 
 	// build our kafka history consumer struct
 	k := &kafkaConsumer{
-		config:       config,
 		handler:      handler,
 
 		saramaConfig: sc,
@@ -187,7 +180,8 @@ func FetchNewestOffsets(cl sarama.Client, topic string) (FetchOffsetsResponse, e
 }
 ```
 
-Back in `NewKafka` we can now call this and store the data in the struct:
+Back to `kafkaConsumer` we can now store the data in the struct and
+update `NewKafka` to call `FetchNewestOffsets`:
 
 ```go
 type kafkaConsumer struct {
@@ -202,7 +196,7 @@ type kafkaConsumer struct {
 	numTopicPartitionsCaughtUp uint32
 }
 
-func NewKafka(config KafkaConfig, handler HandleFunc) HistoryConsumer {
+func NewKafka(topic string, addresses []string, handler HandleFunc) HistoryConsumer {
 	// ...
 
 	// Fetch the latest info about the offsets for the next produced message, per partition
@@ -231,32 +225,42 @@ Each time a message is consumed, we can compare the current offset with the prev
 When they match, the partition is considered caught-up. When all partitions catch up, the HistoryConsumer
 can notify other coroutines of this fact.
 
+There are a few bits purposely not mentioned here, in order to keep it as short and concise as possible.
+Namely, the code that starts consumption of the messages and the handling of them, nor the necessary
+primitives to protect state shared between goroutines.
+
+This `kafkaConsumer` struct satisfies the
+interface [ConsumerGroupHandler](https://pkg.go.dev/github.com/Shopify/sarama#ConsumerGroupHandler),
+and only the `ConsumeClaim` function is relevant for this post.
+
 ```go
+// Process the messages received in this claim, checking the offsets
 func (k *kafkaConsumer) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	for msg := range claim.Messages() {
+		// handle this message
 		err := k.handler(sess.Context(), msg.Value)
 		if err != nil {
 			return err
 		}
-		//
+		// mark message as consumed
 		sess.MarkMessage(msg, "")
 
+		// nothing more to do if we've already caught up
 		if k.caughtUp {
 			return nil
 		}
 
-		// check if this partition has caught up
+		// check if this partition has caught up by consuming this message
 		target := k.offsets[msg.Partition] - 1
 		if msg.Offset == target {
-			atomic.AddUint32(&k.numTopicPartitionsCaughtUp, 1)
+			// one more partition caught up - only one goroutine should write this at a time
+			k.numTopicPartitionsCaughtUp++
 
 			// check if all partitions caught up
-			if k.numTopicPartitions == atomic.LoadUint32(&k.numTopicPartitionsCaughtUp) {
-				if !k.caughtUp {
-					// history consumer caught up
-					close(k.caughtUpSig)
-					k.caughtUp = true
-				}
+			if k.numTopicPartitions == k.numTopicPartitionsCaughtUp {
+				// history consumer caught up
+				close(k.caughtUpSig)
+				k.caughtUp = true
 			}
 		}
 	}
@@ -264,85 +268,22 @@ func (k *kafkaConsumer) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sar
 }
 ```
 
-
-
----
-
-
-CODE DUMPS TO REVISE:
+Clients of this package can then listen to when the consumer group catches up with:
 
 ```go
 func (k *kafkaConsumer) CaughtUp() <-chan struct{} {
 	return k.caughtUpSig
 }
-
-func (k *kafkaConsumer) start(ctx context.Context) error {
-	group, err := sarama.NewConsumerGroupFromClient(k.config.ConsumerGroup, k.client)
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		for {
-			gerr, open := <-group.Errors()
-			if !open {
-				return
-			}
-			if gerr != nil {
-				if cerr, ok := gerr.(*sarama.ConsumerError); ok {
-					// unrecoverable error
-					if cerr.Err == sarama.ErrUnknownMemberId {
-						k.groupCtxLock.RLock()
-						groupCancel := k.groupCancel
-						k.groupCtxLock.RUnlock()
-						if groupCancel != nil {
-							groupCancel()
-						}
-					}
-				}
-			}
-		}
-	}()
-
-	var groupErr error
-consumerGroupLoop:
-	for {
-		groupCtx, groupCancel := context.WithCancel(ctx)
-		defer groupCancel()
-
-		k.groupCtxLock.Lock()
-		k.groupCancel = groupCancel
-		k.groupCtxLock.Unlock()
-		groupErr = group.Consume(groupCtx, k.config.Topics, k)
-
-		select {
-		case <-groupCtx.Done():
-			break consumerGroupLoop
-		default:
-		}
-
-		groupCancel()
-		if groupErr != nil {
-			break consumerGroupLoop
-		}
-	}
-
-	closeErr := group.Close()
-	if closeErr != nil {
-		if groupErr == nil {
-			return closeErr
-		}
-
-		return fmt.Errorf(
-			"error in consumer group: %v - additional error encountered closing group: %v",
-			groupErr, closeErr)
-	}
-
-	return groupErr
-}
-
 ```
 
+## Key takeaways:
+
+`Shopify/sarama` gives us all the tools required for implementing the HistoryConsumer pattern in Kafka.
+Given Kafka's high throughput, it's possible to develop services that consume millions of messages
+to build state fairly quickly and:
+- without requiring persistent storage
+- without requiring manual controls to disable/enable production of new messages
+- can automatically start producing new messages as soon as the consumer catches up with the topic.
 
 [ref1]:https://github.com/nunosilva800/blog/blob/master/1-pattern-history-consumer.md
 [ref2]:https://github.com/Shopify/sarama
