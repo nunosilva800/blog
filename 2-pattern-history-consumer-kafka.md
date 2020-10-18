@@ -139,7 +139,7 @@ func NewKafka(topic string, addresses []string, handler HandleFunc) HistoryConsu
 ### Getting info about consumer group offset
 
 When our consumer connects to Kafka, it can inspect the state of the consumer group to determine
-how many messages there are in the topic and the offset *of the next message to be produced*.
+how many messages there are in the topic and the offset **of the next message to be produced**.
 
 In Kafka a topic can be organised into one or more partitions. We won't go deep into the subject of
 partitions. For now it is enough to know a consumer group has an offset for each partition.
