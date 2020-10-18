@@ -24,8 +24,8 @@ The history consumer pattern will:
 
 To be able to notify other coroutines when the consumer group catches up, we must take note of how many messages
 there are to consume.
-In Kafka, consumers are organised in consumer groups, and they share some properties, such as the *offset*
-towards a *topic*.
+In Kafka, consumers are organised in consumer groups, and they share some properties, such as the **offset**
+towards a **topic**.
 You can think of a topic as the _stream_ or _dataset_ where similar messages are placed.
 
 The offset is a number that marks a position in the topic.
@@ -44,7 +44,7 @@ L: offset of the last message in the topic
 P: offset of the next message to be Produced
 ```
 
-We're interested in the *offset of the next message to be produced*, let's call this our target.
+We're interested in the **offset of the next message to be produced**, let's call this our target.
 Regardless of where a consumer is in the topic, if we take note of the target when it connects to the Kafka
 broker, then on each message consumed, we can check if the offset of that message has reached the target.
 That is when we know the consumer has caught up.
