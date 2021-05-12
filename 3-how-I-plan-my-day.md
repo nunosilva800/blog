@@ -10,7 +10,7 @@ It is not a fancy system, quite the opposite - it is intentionally simple so tha
 done on a computer, phone, paper and maybe even on a smart-watch.
 There are just enough rules to make it effective, but not too many so it doesn't get in my way.
 
-I plan my day using a simple list, with four sections:
+I plan my day using a simple list, with five sections:
 
 1. a title, mentioning the date and tag
     this allows me to filter and sort them on my notes app
@@ -19,6 +19,7 @@ I plan my day using a simple list, with four sections:
 1. what is to be done today, one per line
 1. unstructured "bellow the fold" area for anything worth mentioning
     aka, dumping ground
+1. how I feel **at** certain moments throughout the the day
 
 Here is an example:
 
@@ -38,6 +39,11 @@ Today
 ---
 
 Talk to @jsmith to get credentials for integration with api
+
+@@@
+
+glad work is progressing for big-feature-x
+worried about uncertainty and lack of clarity on Alpha30
 ```
 
 And these are the rules to make this system worthwhile for me:
@@ -68,12 +74,18 @@ Today
 
 ---
 
+@@@
+
 ```
 
 This helps me keep my day focused.
 With a quick glance at this I can recall my thoughts and to continue where I left off.
 Just by looking at the shape of a note, I can tell if it was a quiet or a chaotic day or whether
 I was able to reach my goals or not.
+
+The last section is great when doing weekly recaps and assess how stressful work has been,
+somethings I can spot patterns, and those are the sort of things that I can bring to 
+upper management to sort out, before they get too big.
 
 Following this process, the "worklog" will be like a linked-list of notes - each note mentions
 what was planned for the previous day.
