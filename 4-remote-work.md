@@ -31,9 +31,15 @@ Collection of resources and notes about work and what the future of it might loo
 - easier to feel like part of a team when you can easily see what others are working toward
 - 70% of organizations default to tools (video, chat, and phone) used for office-centric, largely synchronous workflows
 - Nearly half (48%) of teams would call a meeting before communicating asynchronously
--
+
+
+## Additional resources:
+- [How Hashicorp works][4] has plenty of information on how this remote-first, geographically distributed workforce works
+- [Buffer Open blog][5] ocasional posts on how Buffer works, insights and trends they collect from the industry
 
 ---
 [1]: https://www.microsoft.com/en-us/microsoft-365/blog/2020/07/08/future-work-good-challenging-unknown/
 [2]: https://hbr.org/2021/05/how-to-do-hybrid-right
 [3]: https://about.gitlab.com/resources/downloads/remote-work-report-2021.pdf
+[4]: https://works.hashicorp.com/
+[5]: https://buffer.com/resources/open/
